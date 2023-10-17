@@ -88,7 +88,6 @@ def encode_face_img(device, frame, landmarkpredictor):
 
 def processingStyle(device, frame, s_w):
     s_w = vtoonify.zplus2wplus(s_w)
-    print(f"exstyle in processingStyle: {exstyle}")
     if vtoonify.backbone == 'dualstylegan':
         if args.color_transfer:
             s_w = exstyle
@@ -151,7 +150,6 @@ def pSpFeaturesBufferMean(features_buffer):
     return s_w.unsqueeze(0)
 
 def decodeFeaturesToImg(s_w, vtoonify):
-    # print(f"exstyle in decodeFeaturesToImg: {exstyle}")
     s_w = vtoonify.zplus2wplus(s_w)
     frame_tensor, _ = vtoonify.generator.generator([s_w], input_is_latent=True, randomize_noise=True)
     # frame_tensor, _ = vtoonify.generator([s_w], s_w, input_is_latent=True, randomize_noise=True, use_res=False)
@@ -203,7 +201,6 @@ if __name__ == "__main__":
         with torch.no_grad():
             exstyle = vtoonify.zplus2wplus(exstyle)
 
-    print(f"exstyle in main: {exstyle}")
     embeddings_buffer = []
 
     print('Load models successfully!')
