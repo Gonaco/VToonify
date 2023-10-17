@@ -10,13 +10,13 @@ import torch
 from torchvision import transforms
 import torch.nn.functional as F
 # from tqdm import tqdm
-# from model.vtoonify import VToonify
+from model.vtoonify import VToonify
 from model.vtoonify_sum import VToonifySum
 from model.bisenet.model import BiSeNet
 from model.encoder.align_all_parallel import align_face
 from util import save_image, load_image, visualize, load_psp_standalone, get_video_crop_parameter, tensor2cv2
 
-SLIDING_WINDOW_SIZE = 9
+SLIDING_WINDOW_SIZE = 2
 
 class TestOptions():
     def __init__(self):
@@ -77,12 +77,18 @@ def pre_processingImage(args, filename, basename, landmarkpredictor):
     return cropname, savename, sum_savename, frame
 
 
-def processingStyle(device, frame, landmarkpredictor):
+def encode_face_img(device, frame, landmarkpredictor):
+
     I = align_face(frame, landmarkpredictor)
     I = transform(I).unsqueeze(dim=0).to(device)
 
     s_w = pspencoder(I)
+
+    return s_w
+
+def processingStyle(device, frame, s_w):
     s_w = vtoonify.zplus2wplus(s_w)
+    print(f"exstyle in processingStyle: {exstyle}")
     if vtoonify.backbone == 'dualstylegan':
         if args.color_transfer:
             s_w = exstyle
@@ -136,6 +142,22 @@ def lookForSum():
     sum_embedding = torch.mean(add_embedding, 0)
     return sum_embedding
 
+def pSpFeaturesBufferMean(features_buffer):
+    if len(features_buffer) > 1:
+        all_latents = torch.stack(features_buffer, dim=0)
+        s_w = torch.mean(all_latents, dim=0)
+    else:
+        s_w = features_buffer[0]
+    return s_w.unsqueeze(0)
+
+def decodeFeaturesToImg(s_w, vtoonify):
+    # print(f"exstyle in decodeFeaturesToImg: {exstyle}")
+    s_w = vtoonify.zplus2wplus(s_w)
+    frame_tensor, _ = vtoonify.generator.generator([s_w], input_is_latent=True, randomize_noise=True)
+    # frame_tensor, _ = vtoonify.generator([s_w], s_w, input_is_latent=True, randomize_noise=True, use_res=False)
+    frame = ((frame_tensor[0].detach().cpu().numpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8)
+    # frame = frame_tensor.detach().cpu().numpy().astype(np.uint8)
+    return frame
 
 if __name__ == "__main__":
 
@@ -153,8 +175,10 @@ if __name__ == "__main__":
         transforms.Normalize(mean=[0.5, 0.5, 0.5],std=[0.5,0.5,0.5]),
         ])
 
-    vtoonify = VToonifySum(backbone = args.backbone)
+    vtoonify = VToonify(backbone = args.backbone)
+    # vtoonify = VToonifySum(backbone = args.backbone)
     vtoonify.load_state_dict(torch.load(args.ckpt, map_location=lambda storage, loc: storage)['g_ema'])
+    # vtoonify.load_state_dict(torch.load(args.ckpt, map_location=lambda storage, loc: storage)['g_ema'], strict=False)
     vtoonify.to(device)
 
     parsingpredictor = BiSeNet(n_classes=19)
@@ -179,6 +203,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             exstyle = vtoonify.zplus2wplus(exstyle)
 
+    print(f"exstyle in main: {exstyle}")
     embeddings_buffer = []
 
     print('Load models successfully!')
@@ -198,29 +223,40 @@ if __name__ == "__main__":
 
             cropname, savename, sum_savename, frame = pre_processingImage(args, filename, basename, landmarkpredictor)
 
-            s_w, inputs = processingStyle(device, frame, landmarkpredictor)
+            s_w = encode_face_img(device, frame, landmarkpredictor)
 
-            out, skip, encoder_features, adastyles = vtoonify(inputs,
-                                                              s_w.repeat(inputs.size(0), 1, 1),
-                                                              d_s = args.style_degree,
-                                                              return_feat=True)
-            embeddings_buffer.append(out)
-
+            embeddings_buffer.append(torch.squeeze(s_w))
             window_slide()
+            s_w = pSpFeaturesBufferMean(embeddings_buffer)
+            print(frame.shape)
+            frame = decodeFeaturesToImg(s_w, vtoonify)
+            print(frame.shape)
+            cv2.imwrite("./output_test/sum_face_test.jpg", frame)
 
+            s_w, inputs = processingStyle(device, frame, s_w)
+
+            # out, skip, encoder_features, adastyles = vtoonify(inputs,
+            #                                                   s_w.repeat(inputs.size(0), 1, 1),
+            #                                                   d_s = args.style_degree,
+            #                                                   return_feat=True)
+            # embeddings_buffer.append(out)
+
+            # window_slide()
+
+            y_tilde = vtoonify(inputs, s_w.repeat(inputs.size(0), 1, 1), d_s = args.style_degree)
             # d_s has no effect when backbone is toonify
-            y_tilde = vtoonify((inputs, out,skip, encoder_features, adastyles), s_w.repeat(inputs.size(0), 1, 1), d_s = args.style_degree, just_decoder=True)
+            # y_tilde = vtoonify((inputs, out,skip, encoder_features, adastyles), s_w.repeat(inputs.size(0), 1, 1), d_s = args.style_degree, just_decoder=True)
             y_tilde = torch.clamp(y_tilde, -1, 1)
 
             cv2.imwrite(cropname, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
             save_image(y_tilde[0].cpu(), savename)
 
-            if len(embeddings_buffer) > 1:
-                sum_embedding = lookForSum()
-                y_tilde_sum = vtoonify((inputs, sum_embedding, skip, encoder_features, adastyles), s_w.repeat(inputs.size(0), 1, 1), d_s = args.style_degree, just_decoder=True)
-                y_tilde_sum = torch.clamp(y_tilde, -1, 1)
+            # if len(embeddings_buffer) > 1:
+            #     sum_embedding = lookForSum()
+            #     y_tilde_sum = vtoonify((inputs, sum_embedding, skip, encoder_features, adastyles), s_w.repeat(inputs.size(0), 1, 1), d_s = args.style_degree, just_decoder=True)
+            #     y_tilde_sum = torch.clamp(y_tilde, -1, 1)
 
-                # cv2.imwrite(cropname, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-                save_image(y_tilde_sum[0].cpu(), sum_savename)
+            #     # cv2.imwrite(cropname, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+            #     save_image(y_tilde_sum[0].cpu(), sum_savename)
 
         print('Transfer style successfully!')
