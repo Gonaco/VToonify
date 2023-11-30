@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 
 import cv2
-from remove_background import remove_background
 import torch
 import dlib
 import numpy as np
@@ -20,6 +19,7 @@ else:
     from model.bisenet.bisnet_model import BiSeNet
     from model.encoder.align_all_parallel import align_face
     from model.vtoonify import VToonify
+from remove_background import remove_background
 from torchvision import transforms
 from util import get_video_crop_parameter
 from util import load_psp_standalone
@@ -137,6 +137,8 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
         self.latent_mask = self.default_latent_mask
         self.style_degree = self.default_style_degree
         self.skip_vtoonify = self.default_skip_vtoonify
+        self.set_background = self.default_set_background
+        self.style_index = self.default_style_index
 
         self.vtoonify = VToonify(backbone=self.backbone)
         self.vtoonify.load_state_dict(torch.load(vtoonify_path, map_location=lambda storage, loc: storage)['g_ema'])
@@ -256,7 +258,7 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
         frame = align_face(frame, self.landmarkpredictor)
         frame = self.transform(frame).unsqueeze(dim=0).to(self.device)
         if self.set_background:
-            frame = remove_background(frame, white_background=self.set_background=="WHITE")
+            frame = remove_background(frame, white_background=self.set_background=="WHITE").to(self.device)
 
         return frame
 
