@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import cv2
+from remove_background import remove_background
 import torch
 import dlib
 import numpy as np
@@ -30,11 +31,6 @@ import base64
 
 def setup_parser():
     parser = argparse.ArgumentParser(description='Style Transfer')
-    
-    # Add arguments to the parser
-    parser.add_argument('--content', type=str, default='./data', help='path of the folder with the content image/video')
-    # ... (add the rest of the arguments in a similar way)
-
 
     parser = argparse.ArgumentParser(description='Style Transfer')
     parser.add_argument('--content', type=str, default='./data', help='path of the folder with the content image/video')
@@ -46,12 +42,16 @@ def setup_parser():
     parser.add_argument('--scale_image', action='store_true', help='resize and crop the image to best fit the model')
     parser.add_argument('--style_encoder_path', type=str, default='./checkpoint/encoder.pt', help='path of the style encoder')
     parser.add_argument('--exstyle_path', type=str, default=None, help='path of the extrinsic style code')
+    parser.add_argument('--style_image_folder', type=str, default=None, help='path of the style image used instead of the exstyle path and style_id')
     parser.add_argument('--faceparsing_path', type=str, default='./checkpoint/faceparsing.pth', help='path of the face parsing model')
     parser.add_argument('--cpu', action='store_true', help='if true, only use cpu')
     parser.add_argument('--backbone', type=str, default='dualstylegan', help='dualstylegan | toonify')
     parser.add_argument('--padding', type=int, nargs=4, default=[200, 200, 200, 200], help='left, right, top, bottom paddings to the face center')
     parser.add_argument('--skip_vtoonify', action='store_true', help='Skip VToonify Styling and create final image only with generator model')
     parser.add_argument('--psp_style', type=int, nargs='*', help='Mix face and style after pSp encoding', default=[])
+    parser.add_argument('--set_background', type=str, default=None,
+                        help='Set the image background to "BLACK" or "WHITE". Default is None to leave original background. Options other than "BLACK" or "WHITE" fallback to "BLACK"' 
+    )
 
     return parser
 
@@ -86,6 +86,8 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
         self.default_latent_mask = []
         self.default_style_degree = 0.1
         self.default_skip_vtoonify = True
+        self.default_style_index = 0
+        self.default_set_background = None
 
     def initialize(self, context):
         """
@@ -117,6 +119,7 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
             face_landmark_modelname = 'shape_predictor_68_face_landmarks.dat'
             style_encoder_path = "encoder.pt" # pSp encoder url https://drive.google.com/file/d/1bMTNWkh5LArlaWSc_wa8VKyq2V42T2z0/view
             exstyle_path = "exstyle_code.npy"
+            self.exstyle_images = ['Peter_Mohrbacher-0048.jpeg', 'Peter_Mohrbacher-0054.jpeg']
         else:
             self.backbone = self.manifest['models']['backbone']
             vtoonify_path = self.manifest['models']['vtoonify']
@@ -124,6 +127,8 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
             face_landmark_modelname = './checkpoint/shape_predictor_68_face_landmarks.dat'
             style_encoder_path = self.manifest['models']['style_encoder']
             exstyle_path = self.manifest['models']['exstyle']
+            exstyle_image_folder = self.manifest['models']['style_image_folder']
+            self.exstyle_images = [f'{exstyle_image_folder}/{image_name}' for image_name in os.listdir(exstyle_image_folder)]
 
         self.sliding_window_size = self.default_sliding_window_size
         self.FPS = self.default_FPS
@@ -157,12 +162,23 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
 
         # Load External Styles
         if self.backbone == 'dualstylegan':
-            self.style_id = -1
-            self.exstyles = np.load(exstyle_path, allow_pickle='TRUE').item()
-            stylename = list(self.exstyles.keys())[self.style_id]
-            self.exstyle = torch.tensor(self.exstyles[stylename]).to(self.device)
-            with torch.no_grad():
-                self.exstyle = self.vtoonify.zplus2wplus(self.exstyle)
+            if self.exstyle_images:
+                self.exstyles = []
+                for exstyle_image_path in self.exstyle_images:
+                    print(f'Loading Style image from {exstyle_image_path}')
+                    exstyle_image = cv2.imread(exstyle_image_path)
+                    with torch.no_grad():
+                        exstyle_image = self.pre_processingImage(exstyle_image)
+                        self.exstyle = self.encode_face_img(exstyle_image).to(self.device)
+                    self.exstyles.append(self.exstyle)
+                self.exstyle = self.exstyles[0]
+            else:
+                self.exstyles = np.load(self.manifest['models']['exstyle'], allow_pickle='TRUE').item()
+                # stylename = list(self.exstyles.keys())[self.manifest['models']['style_id']]
+                # self.exstyle = torch.tensor(self.exstyles[stylename]).to(self.device)
+                # with torch.no_grad():
+                #     self.exstyle = self.vtoonify.zplus2wplus(self.exstyle)  
+                # self.exstyles = [self.exstyle]
 
 
         self.initialized = True
@@ -178,7 +194,9 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
         self.scale_image = input_item.get('scale_image', self.default_scale_image)
         self.latent_mask = input_item.get('latent_mask', self.default_latent_mask)
         self.style_degree = input_item.get('style_degree', self.default_style_degree)
+        self.style_index = input_item.get('style_index', self.default_style_index)
         self.skip_vtoonify = input_item.get('skip_vtoonify', self.default_skip_vtoonify)
+        self.set_background = input_item.get('set_background', self.default_set_background)
 
         print(f"Handling image with parametters:")
         print(f"\tsliding_window_size: {self.sliding_window_size}")
@@ -187,7 +205,9 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
         print(f"\tscale_image: {self.scale_image}")
         print(f"\tlatent_mask: {self.latent_mask}")
         print(f"\tstyle_degree: {self.style_degree}")
+        print(f"\tstyle_index: {self.style_index}")
         print(f"\tskip_vtoonify: {self.skip_vtoonify}")
+        print(f"\tset_background: {self.set_background}")
 
         image_array = np.frombuffer(image_bytes, np.uint8)
         frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
@@ -201,7 +221,7 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
 
             # Stylize pSp image
             print('Stylizing image with pSp')
-            s_w = self.applyExstyle(s_w, self.exstyle, self.latent_mask)
+            s_w = self.applyExstyle(s_w, self.exstyles[self.style_index], self.latent_mask)
 
             self.embeddings_buffer.append(torch.squeeze(s_w))
             self.window_slide()
@@ -235,6 +255,8 @@ class VToonifyHandler(BaseHandler): # for TorchServe  it need to inherit from Ba
 
         frame = align_face(frame, self.landmarkpredictor)
         frame = self.transform(frame).unsqueeze(dim=0).to(self.device)
+        if self.set_background:
+            frame = remove_background(frame, white_background=self.set_background=="WHITE")
 
         return frame
 
@@ -390,6 +412,7 @@ if __name__ == '__main__':
             'backbone': args.backbone,
             'exstyle': args.exstyle_path,
             'style_id': args.style_id,
+            'style_image_folder': args.style_image_folder,
         }
     }
     context = Context(model_dir=model_dir, model_name="vtoonify", manifest=manifest,batch_size=1,gpu=0,mms_version="1.0.0")
@@ -418,6 +441,8 @@ if __name__ == '__main__':
             "latent_mask": args.psp_style,
             "style_degree": args.style_degree,
             "skip_vtoonify": args.skip_vtoonify,
+            "style_index": args.style_id,
+            "set_background": args.set_background,
             }},
         ], context)
 

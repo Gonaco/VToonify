@@ -1,4 +1,6 @@
 dlib==19.*
+pymatting==1.1.*
+rembg==2.0.*
 numpy==1.*
 opencv-python==4.8.*
 pillow==10.*
