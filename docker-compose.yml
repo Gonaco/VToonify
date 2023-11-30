@@ -3,7 +3,7 @@ services:
  elface-torchserve:
    build:
      context: .
-     dockerfile: Dockerfile
+     dockerfile: docker/Dockerfile
    runtime: nvidia
    shm_size: '14g'
    ports:

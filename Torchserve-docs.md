@@ -36,7 +36,7 @@ torch-model-archiver --model-name vToonify --version 1.0 \
 --extra-files util.py,./model/vtoonify.py,./model/dualstylegan.py,./model/stylegan/stylegan_model.py,./model/stylegan/op/__init__.py,./model/stylegan/op/upfirdn2d_pkg.py,./model/stylegan/op/fused_act.py,./model/encoder/align_all_parallel.py,./model/bisenet/bisnet_model.py,./model/bisenet/resnet.py,./model/stylegan/op/upfirdn2d_kernel.cu,./model/stylegan/op/fused_bias_act.cpp,./model/stylegan/op/fused_bias_act_kernel.cu,./model/stylegan/op/upfirdn2d.cpp,./model/stylegan/op/conv2d_gradfix.py,./model/encoder/encoders/psp_encoders.py,./model/encoder/encoders/helpers.py,./checkpoint/arcane/vtoonify_s_d.pt,./checkpoint/faceparsing.pth,./checkpoint/encoder.pt,./checkpoint/arcane/exstyle_code.npy,./checkpoint/shape_predictor_68_face_landmarks.dat
 ```
 
-Create `model_stsore` folder if missing
+Create `model_store` folder if missing
 ```
 mkdir model_store
 ```
@@ -96,20 +96,21 @@ docker build -t elface-torchserve-image . -f docker/Dockerfile
 
 This image will be used to both generate the `.mar` file and run the model.
 
+*NOTE*: This image takes more than 30 min to be built.
+
 ## Run TorchServe Image
 
 We will now run the docker image with the main code folder as a volume so the important files can be added to the `.mar` file.
 
 ```
 docker run --rm -it -p 8080:8080 -p 8081:8081 \
-            -v $(pwd):/home/model-server/model_files \
+            -v $(pwd):/home/model-server/crypsis-delizziosa-model \
             --name elface-torchserve elface-torchserve-image:latest
 ```
 For GPU
 ```
 docker run --rm -it --gpus all \
             -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 -p 127.0.0.1:8082:8082 -p 127.0.0.1:7070:7070 -p 127.0.0.1:7071:7071 \
-            -v $(pwd):/home/model-server/model_files \
             --name elface-torchserve elface-torchserve-image:latest
 ```
 
@@ -121,21 +122,21 @@ docker exec -it --user root elface-torchserve /bin/bash
 ```
 
 Execute the `torch-model-archiver`. The same command as [Generate Model Archiver section](#generate-model-archiver) the docker but:
-- File paths being `./model_files` instead of `./` and adding
-- Add `--export-path /home/model-server/model_files/model_store` to store the `.mar` in the local `model_store` folder
+- File paths being `./crypsis-delizziosa-model` instead of `./` and adding
+- Add `--export-path /home/model-server/crypsis-delizziosa-model/model_store` to store the `.mar` in the local `model_store` folder
 - Add requirements file to install dependencies.
   - While running on local they are present in the environment but they need to be added and the installed when starting torchserve
 
 ```
 torch-model-archiver --model-name vToonify --version 1.0 \
---serialized-file ./model_files/checkpoint/arcane/vtoonify_s_d.pt \
---model-file ./model_files/model/vtoonify.py \
---handler ./model_files/main \
---export-path /home/model-server/model_files/model_store \
---extra-files ./model_files/util.py,./model_files/model/vtoonify.py,./model_files/model/dualstylegan.py,./model_files/model/stylegan/stylegan_model.py,./model_files/model/stylegan/op/__init__.py,./model_files/model/stylegan/op/upfirdn2d_pkg.py,./model_files/model/stylegan/op/fused_act.py,./model_files/model/encoder/align_all_parallel.py,./model_files/model/bisenet/bisnet_model.py,./model_files/model/bisenet/resnet.py,./model_files/model/stylegan/op/upfirdn2d_kernel.cu,./model_files/model/stylegan/op/fused_bias_act.cpp,./model_files/model/stylegan/op/fused_bias_act_kernel.cu,./model_files/model/stylegan/op/upfirdn2d.cpp,./model_files/model/stylegan/op/conv2d_gradfix.py,./model_files/model/encoder/encoders/psp_encoders.py,./model_files/model/encoder/encoders/helpers.py,./model_files/checkpoint/arcane/vtoonify_s_d.pt,./model_files/checkpoint/faceparsing.pth,./model_files/checkpoint/encoder.pt,./model_files/checkpoint/arcane/exstyle_code.npy,./model_files/checkpoint/shape_predictor_68_face_landmarks.dat
+--serialized-file ./crypsis-delizziosa-model/checkpoint/arcane/vtoonify_s_d.pt \
+--model-file ./crypsis-delizziosa-model/model/vtoonify.py \
+--handler ./crypsis-delizziosa-model/main \
+--export-path /home/model-server/crypsis-delizziosa-model/model_store \
+--extra-files ./crypsis-delizziosa-model/util.py,./crypsis-delizziosa-model/model/vtoonify.py,./crypsis-delizziosa-model/model/dualstylegan.py,./crypsis-delizziosa-model/model/stylegan/stylegan_model.py,./crypsis-delizziosa-model/model/stylegan/op/__init__.py,./crypsis-delizziosa-model/model/stylegan/op/upfirdn2d_pkg.py,./crypsis-delizziosa-model/model/stylegan/op/fused_act.py,./crypsis-delizziosa-model/model/encoder/align_all_parallel.py,./crypsis-delizziosa-model/model/bisenet/bisnet_model.py,./crypsis-delizziosa-model/model/bisenet/resnet.py,./crypsis-delizziosa-model/model/stylegan/op/upfirdn2d_kernel.cu,./crypsis-delizziosa-model/model/stylegan/op/fused_bias_act.cpp,./crypsis-delizziosa-model/model/stylegan/op/fused_bias_act_kernel.cu,./crypsis-delizziosa-model/model/stylegan/op/upfirdn2d.cpp,./crypsis-delizziosa-model/model/stylegan/op/conv2d_gradfix.py,./crypsis-delizziosa-model/model/encoder/encoders/psp_encoders.py,./crypsis-delizziosa-model/model/encoder/encoders/helpers.py,./crypsis-delizziosa-model/checkpoint/arcane/vtoonify_s_d.pt,./crypsis-delizziosa-model/checkpoint/faceparsing.pth,./crypsis-delizziosa-model/checkpoint/encoder.pt,./crypsis-delizziosa-model/checkpoint/arcane/exstyle_code.npy,./crypsis-delizziosa-model/checkpoint/shape_predictor_68_face_landmarks.dat
 ```
 
-To add requirements file use `--requirements-file model_files/requirements.txt`. Should be needed since we are craeting image with dependencies
+To add requirements file use `--requirements-file crypsis-delizziosa-model/requirements.txt`. Should be needed since we are craeting image with dependencies
 
 ## Run TorchServe with model
 
@@ -147,16 +148,13 @@ In order to run the model we will run the same docker image but with some differ
 - `--ulimit stack` may also be usefull but don't know yet. In the example is set to `67108864`
 
 ```
-docker run --rm -it --runtime=nvidia --gpus all \
-            --shm-size=14g \
-            -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 -p 127.0.0.1:8082:8082 -p 127.0.0.1:7070:7070 -p 127.0.0.1:7071:7071 \
-            -v $(pwd)/model_store:/home/model-server/model_files/model_store \
-            -v ${PWD}/config.properties:/home/model-server/model_files/config.properties \
-            --ulimit memlock=-1 \
-            --name elface-torchserve elface-torchserve-image:latest \
-            torchserve --start --model-store=/home/model-server/model_files/model_store \
-            --models vToonify=vToonify.mar \
-            --ts-config /home/model-server/model_files/config.properties
+docker run --rm -it --runtime=nvidia --gpus all --shm-size=14g -p 8080:8080 -p 8081:8081 -p 8082:8082 -p 7070:7070 -p 7071:7071 --ulimit memlock=-1 --name elface-torchserve elface-torchserve-image:latest
+```
+
+Alternatively, running it using --user root could be necessary to let the creation of logs by TorchServe:
+
+```
+docker run --rm -it --runtime=nvidia --gpus all --shm-size=14g --user root -p 8080:8080 -p 8081:8081 -p 8082:8082 -p 7070:7070 -p 7071:7071 --ulimit memlock=-1 --name elface-torchserve elface-torchserve-image:latest
 ```
 
 ### Model configuration via config.properties
