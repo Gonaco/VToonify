@@ -6,6 +6,9 @@ from rembg import remove
 import cv2
 from util import tensor2np_uint8
 from util import np2tensor
+from rembg.session_factory import new_session
+
+session = new_session("u2net")
 
 def remove_background(input_image, white_background):    
     print('Removing image background')
@@ -31,6 +34,7 @@ def get_person_mask(image):
     mask = remove(
         data=image,
         only_mask=True,
+        session=session,
     )
 
     for _ in range(0):
